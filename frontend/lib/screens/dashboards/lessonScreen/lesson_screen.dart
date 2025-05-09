@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../services/api_service.dart';
 import '../../dashboards/lessonScreen/learning_top_bar.dart';
 import '../../dashboards/lessonScreen/video_section.dart';
+import '../../dashboards/quizes/quiz_card.dart'; // ✅ Updated path to QuizCard
 
 class LessonModuleScreen extends StatefulWidget {
   final int lessonId;
@@ -27,22 +28,42 @@ class _LessonModuleScreenState extends State<LessonModuleScreen> {
 
   Future<void> _loadLessonData() async {
     try {
-      final quizData = await ApiService().fetchGeneratedQuiz(widget.lessonId);
+      final rawData = await ApiService().fetchGeneratedQuiz(widget.lessonId);
+      final List<Map<String, dynamic>> signs = [];
+      final List<Map<String, dynamic>> quizzes = [];
 
-      final List<Map<String, dynamic>> mergedContent = [];
-      for (final item in quizData) {
+      for (final item in rawData) {
         if (item['type'] == 'video_to_text') {
-          mergedContent.add({
+          signs.add({
             "type": "sign",
             "word": item['correct_answer'],
             "videoUrl": item['video_url'],
           });
         }
-        mergedContent.add(item);
+        quizzes.add(item);
+      }
+
+      final List<Map<String, dynamic>> mixedContent = [];
+      int signIndex = 0;
+      int quizIndex = 0;
+
+      while (signIndex < signs.length || quizIndex < quizzes.length) {
+        if (signIndex < signs.length) {
+          mixedContent.add(signs[signIndex]);
+          signIndex++;
+
+          if (quizIndex < quizzes.length) {
+            mixedContent.add(quizzes[quizIndex]);
+            quizIndex++;
+          }
+        } else if (quizIndex < quizzes.length) {
+          mixedContent.add(quizzes[quizIndex]);
+          quizIndex++;
+        }
       }
 
       setState(() {
-        lessonContent = mergedContent;
+        lessonContent = mixedContent;
         isLoading = false;
       });
     } catch (e) {
@@ -74,7 +95,7 @@ class _LessonModuleScreenState extends State<LessonModuleScreen> {
             actions: [
               ElevatedButton(
                 onPressed: () {
-                  Navigator.of(context).pop(); // Close dialog
+                  Navigator.of(context).pop();
                   Navigator.pushNamedAndRemoveUntil(
                     context,
                     '/user',
@@ -121,7 +142,6 @@ class _LessonModuleScreenState extends State<LessonModuleScreen> {
         hearts = (hearts > 0) ? hearts - 1 : 0;
       });
     }
-
     Future.delayed(const Duration(seconds: 1), handleNext);
   }
 
@@ -160,7 +180,6 @@ class _LessonModuleScreenState extends State<LessonModuleScreen> {
                         onSlowMotionPressed: handleSlowMotion,
                         height: 240,
                       ),
-
                       const SizedBox(height: 24),
                       Text(
                         currentItem['word'],
@@ -192,119 +211,12 @@ class _LessonModuleScreenState extends State<LessonModuleScreen> {
                 ),
               )
             else
-              _buildQuiz(currentItem),
+              QuizCard(quizItem: currentItem, onAnswered: checkAnswer),
 
             const SizedBox(height: 20),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildQuiz(Map<String, dynamic> item) {
-    bool isAnswered = false;
-    String? selectedOption;
-    final choices = item['choices'];
-    if (choices == null || choices.isEmpty) {
-      // Show message for 2 seconds, then auto-skip
-      Future.delayed(const Duration(seconds: 2), handleNext);
-
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 32),
-        child: Text(
-          "No choices available. Skipping...",
-          style: TextStyle(color: Colors.grey),
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
-
-    return StatefulBuilder(
-      builder: (context, setInnerState) {
-        return Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 500),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  "Guess the sign",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 16),
-
-                // 🎞️ Video Section with null-safe check
-                if (item['video_url'] != null &&
-                    item['video_url'].toString().isNotEmpty)
-                  VideoSection(
-                    videoUrl: item['video_url'],
-                    onMirrorPressed: null,
-                    onSlowMotionPressed: null,
-                    height: 240,
-                  )
-                else
-                  Container(
-                    height: 240,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      color: Colors.black12,
-                    ),
-                    child: const Text(
-                      "No video available",
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ),
-
-                const SizedBox(height: 24),
-
-                // 🔘 Answer Options
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  alignment: WrapAlignment.center,
-                  children: List.generate(item['choices'].length, (index) {
-                    final option = item['choices'][index];
-                    final isCorrect = option == item['correct_answer'];
-                    final isSelected = option == selectedOption;
-
-                    Color borderColor() {
-                      if (!isAnswered) return Colors.orange;
-                      if (isSelected && isCorrect) return Colors.green;
-                      if (isSelected && !isCorrect) return Colors.red;
-                      return Colors.orange;
-                    }
-
-                    return OutlinedButton(
-                      onPressed:
-                          isAnswered
-                              ? null
-                              : () {
-                                setInnerState(() {
-                                  selectedOption = option;
-                                  isAnswered = true;
-                                });
-                                checkAnswer(isCorrect);
-                              },
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: borderColor(), width: 2),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 12,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                      ),
-                      child: Text(option, style: const TextStyle(fontSize: 16)),
-                    );
-                  }),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

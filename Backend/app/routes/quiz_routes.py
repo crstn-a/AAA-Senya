@@ -1,4 +1,3 @@
-# 📁 Add this to a new `quiz_routes.py` file or existing routes module
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -10,17 +9,31 @@ router = APIRouter(prefix="/quiz", tags=["Quiz"])
 
 @router.get("/generate/{lesson_id}", summary="Generate smart quiz based on lesson")
 async def generate_quiz(lesson_id: int, db: AsyncSession = Depends(get_db)):
-    # 🔍 Fetch signs for the lesson
-    result = await db.execute(select(Sign).where(Sign.lesson_id == lesson_id, Sign.archived == False))
-    signs = result.scalars().all()
+    result = await db.execute(
+        select(Sign).where(Sign.lesson_id == lesson_id, Sign.archived == False)
+    )
+    raw_signs = result.scalars().all()
 
-    if not signs or len(signs) < 2:
-        raise HTTPException(status_code=400, detail="Not enough signs in this lesson to generate a quiz.")
+    # ✅ FILTER: keep only signs with non-empty video and text
+    signs = [
+        s for s in raw_signs
+        if s.video_url and s.video_url.strip() != "" and s.text and s.text.strip() != ""
+    ]
+    
+    print("✅ Signs used in quiz:")
+    for s in signs:
+        print(f" - {s.text} @ {s.video_url}")
+
+    if not signs or len(signs) < 1:
+        raise HTTPException(status_code=400, detail="Not enough valid signs to generate a quiz.")
 
     quiz = []
     for sign in signs:
-        # 🎥 1. VIDEO_TO_TEXT: Pick 3 distractors
-        distractors = random.sample([s.text for s in signs if s.id != sign.id], k=min(3, len(signs) - 1))
+        # 🎥 VIDEO_TO_TEXT
+        text_pool = list({s.text for s in signs if s.text != sign.text})
+        while len(text_pool) < 3:
+            text_pool.append(random.choice([s.text for s in signs if s.text != sign.text]))
+        distractors = random.sample(text_pool, 3)
         choices = distractors + [sign.text]
         random.shuffle(choices)
 
@@ -31,9 +44,12 @@ async def generate_quiz(lesson_id: int, db: AsyncSession = Depends(get_db)):
             "choices": choices
         })
 
-        # 📺 2. TEXT_TO_VIDEO: Pick 2 distractor videos
-        distractor_videos = random.sample([s.video_url for s in signs if s.id != sign.id], k=min(2, len(signs) - 1))
-        video_choices = distractor_videos + [sign.video_url]
+        # 📺 TEXT_TO_VIDEO
+        video_pool = list({s.video_url for s in signs if s.video_url != sign.video_url})
+        while len(video_pool) < 3:
+            video_pool.append(random.choice([s.video_url for s in signs if s.video_url != sign.video_url]))
+        video_choices = random.sample(video_pool, 3)
+        video_choices.append(sign.video_url)
         random.shuffle(video_choices)
 
         quiz.append({
@@ -44,3 +60,4 @@ async def generate_quiz(lesson_id: int, db: AsyncSession = Depends(get_db)):
         })
 
     return quiz
+

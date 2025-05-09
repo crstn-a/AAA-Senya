@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../../../themes/color.dart';
 import '../../../services/api_service.dart';
+import 'lesson_screen.dart';
 
 class LessonCard extends StatefulWidget {
   final Map<String, dynamic> lesson;
@@ -56,11 +57,61 @@ class _LessonCardState extends State<LessonCard> {
     final lessonNumber = (widget.lesson['order_index'] ?? 0) + 1;
 
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
         if (isLocked) {
           _showLockDialog(context);
         } else {
-          // TODO: Navigate to lesson detail screen
+          final userId = widget.userId;
+          final lessonId = widget.lesson['id'];
+
+          try {
+            final res = await _apiService.get('/status/$userId');
+            final data = jsonDecode(res.body);
+            final hearts = data['hearts'] ?? 0;
+
+            if (hearts <= 0) {
+              showDialog(
+                context: context,
+                builder:
+                    (ctx) => AlertDialog(
+                      title: const Text("No Hearts Available"),
+                      content: const Text(
+                        "You need at least 1 heart to play this lesson.",
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            Navigator.pushNamed(context, '/heart-shop');
+                          },
+                          child: const Text("Buy Hearts"),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            Navigator.pushNamedAndRemoveUntil(
+                              context,
+                              '/user',
+                              (r) => false,
+                            );
+                          },
+                          child: const Text("Exit"),
+                        ),
+                      ],
+                    ),
+              );
+            } else {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => LessonModuleScreen(lessonId: lessonId),
+                ),
+              );
+            }
+          } catch (e) {
+            print("Error checking hearts: $e");
+            // Optional: show a fallback error dialog here
+          }
         }
       },
       child: Container(
