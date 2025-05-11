@@ -33,6 +33,7 @@ async def get_profile(user_id: int, db: AsyncSession = Depends(get_db)):
         "account": {
             "user_id": account.user_id,
             "name": account.name,
+            "username": account.username,
             "email": account.email,
         },
         "profile": {
@@ -58,10 +59,21 @@ async def update_profile(
 
     if update.name is not None:
         account.name = update.name
+
+    if update.username is not None:
+        existing_username = await db.execute(
+            select(Account).where(Account.username == update.username, Account.user_id != user_id)
+    )
+        if existing_username.scalars().first():
+            raise HTTPException(400, "Username already taken")
+        account.username = update.username
+
     if update.email is not None:
         account.email = update.email
+
     if update.password is not None:
         account.hash_password = hash_password(update.password)
+
 
     prof_res = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
     profile = prof_res.scalars().first()

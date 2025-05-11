@@ -31,7 +31,7 @@ async def signup(user: UserSignup, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(new_account)
 
-    new_profile = UserProfile(user_id=new_account.user_id)
+    new_profile = UserProfile(user_id=new_account.user_id, rubies=20)
     db.add(new_profile)
     await db.commit()
 
@@ -63,6 +63,7 @@ async def login(user: UserLogin, db: AsyncSession = Depends(get_db)):
         "user": {
             "id": account.user_id,
             "name": account.name,
+            "username": account.username,
             "email": account.email,
             "role": account.role,
             "status": account.status
@@ -87,6 +88,7 @@ async def admin_login(admin: AdminLogin, db: AsyncSession = Depends(get_db)):
         "user": {
             "id": account.user_id,
             "name": account.name,
+            "username": account.username,
             "email": account.email,
             "role": account.role,
             "status": account.status

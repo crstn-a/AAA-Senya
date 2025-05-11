@@ -47,6 +47,11 @@ class _LessonCardState extends State<LessonCard> {
       });
     } catch (e) {
       debugPrint("Error loading lesson status: $e");
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -104,7 +109,11 @@ class _LessonCardState extends State<LessonCard> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => LessonModuleScreen(lessonId: lessonId),
+                  builder:
+                      (context) => LessonModuleScreen(
+                        lessonId: lessonId,
+                        lessonTitle: title,
+                      ),
                 ),
               );
             }

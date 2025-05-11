@@ -29,6 +29,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool isEdited = false;
   int userId = 0;
   bool isLoading = true;
+  bool isSaving = false;
 
   final ApiService _apiService = ApiService();
   List<Map<String, dynamic>> unitProgress = [];
@@ -124,22 +125,108 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void showEditDialog() async {
-    String newName = displayName;
-    String newUsername = username;
+    final nameController = TextEditingController(text: displayName);
+    final usernameController = TextEditingController(text: username);
     html.File? selectedFile;
+    bool localSaving = false;
+    bool usernameHasSpace = false;
 
     await showDialog(
       context: context,
       builder:
           (context) => StatefulBuilder(
             builder: (context, setDialogState) {
+              Future<void> handleSave() async {
+                setDialogState(() => localSaving = true);
+                String? newAvatarUrl;
+
+                // Upload profile picture
+                if (selectedFile != null) {
+                  try {
+                    final formData = html.FormData();
+                    formData.appendBlob(
+                      'file',
+                      selectedFile!,
+                      selectedFile!.name,
+                    );
+                    final request = await html.HttpRequest.request(
+                      'http://localhost:8000/api/profile/$userId/upload-profile-picture',
+                      method: 'POST',
+                      sendData: formData,
+                      requestHeaders: {
+                        'Authorization':
+                            'Bearer ${await _apiService.getToken()}',
+                      },
+                    );
+                    if (request.status == 200) {
+                      final result = jsonDecode(request.responseText!);
+                      newAvatarUrl = result['profile_url'];
+                    } else {
+                      throw Exception("Upload failed");
+                    }
+                  } catch (e) {
+                    setDialogState(() => localSaving = false);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Image upload failed"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+                }
+
+                // Save profile data
+                final result = await _apiService.updateUserProfile(
+                  nameController.text.trim(),
+                  usernameController.text.trim(),
+                );
+
+                setDialogState(() => localSaving = false);
+
+                if (result == null) {
+                  setState(() {
+                    displayName = nameController.text.trim();
+                    username = usernameController.text.trim();
+                    if (newAvatarUrl != null) {
+                      final bustedUrl =
+                          '$newAvatarUrl?v=${DateTime.now().millisecondsSinceEpoch}';
+                      avatarUrl = bustedUrl;
+                    }
+                    isEdited = true;
+                  });
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Profile updated successfully!"),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(result),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+
+              final nameChanged = nameController.text.trim() != displayName;
+              final usernameChanged =
+                  usernameController.text.trim() != username;
+              final canSubmit =
+                  (nameChanged || usernameChanged || selectedFile != null) &&
+                  (!usernameHasSpace ||
+                      isEdited); // if isEdited true, ignore username check
+
               return AlertDialog(
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
                 content: SizedBox(
                   width: 500,
-                  height: 500,
+                  height: 520,
                   child: SingleChildScrollView(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -162,11 +249,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           alignment: Alignment.bottomCenter,
                           children: [
                             CircleAvatar(
-                              radius: 50,
-                              backgroundImage: NetworkImage(avatarUrl),
+                              radius: 60,
+                              backgroundImage: NetworkImage(
+                                avatarUrl.isNotEmpty &&
+                                        !avatarUrl.startsWith("data:")
+                                    ? avatarUrl
+                                    : 'https://via.placeholder.com/150',
+                              ),
                             ),
                             TextButton(
-                              onPressed: () async {
+                              onPressed: () {
                                 html.FileUploadInputElement uploadInput =
                                     html.FileUploadInputElement();
                                 uploadInput.accept = 'image/*';
@@ -181,7 +273,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       final imageUrl = reader.result as String;
                                       setDialogState(() {
                                         selectedFile = file;
-                                        avatarUrl = imageUrl;
+                                        //avatarUrl = imageUrl;
                                       });
                                     });
                                   }
@@ -196,18 +288,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(height: 16),
                         TextField(
+                          controller: nameController,
                           decoration: const InputDecoration(labelText: 'Name:'),
-                          controller: TextEditingController(text: newName),
-                          onChanged: (val) => newName = val,
+                          onChanged: (_) => setDialogState(() {}),
                         ),
                         const SizedBox(height: 8),
                         TextField(
+                          controller: usernameController,
+                          enabled: !isEdited, // disable after first edit
                           decoration: const InputDecoration(
                             labelText: 'Username:',
                           ),
-                          controller: TextEditingController(text: newUsername),
-                          onChanged: (val) => newUsername = val,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              usernameHasSpace = value.contains(' ');
+                            });
+                          },
                         ),
+                        if (usernameHasSpace && !isEdited)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4.0),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                "❌ Username must not contain spaces.",
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
                         const SizedBox(height: 8),
                         TextField(
                           readOnly: true,
@@ -227,15 +338,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.accentOrange,
                           ),
-                          onPressed: () async {
-                            setState(() {
-                              displayName = newName;
-                              username = newUsername;
-                              isEdited = true;
-                            });
-                            Navigator.pop(context);
-                          },
-                          child: const Text("Save Changes"),
+                          onPressed: canSubmit ? () => handleSave() : null,
+                          child:
+                              localSaving
+                                  ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                  : const Text("Save Changes"),
                         ),
                       ],
                     ),

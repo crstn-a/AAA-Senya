@@ -1,4 +1,3 @@
-// Enhanced QuizCard with fixed video tap, null safety, and centered confetti
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:confetti/confetti.dart';
@@ -23,6 +22,7 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
   bool confirmVisible = false;
   Map<String, VideoPlayerController> _controllers = {};
   late ConfettiController _confettiController;
+  bool _disposed = false;
 
   @override
   void initState() {
@@ -36,25 +36,37 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
   void _initializeControllers() {
     final item = widget.quizItem;
     final isVideoToText = item['type'] == 'video_to_text';
-    final options = isVideoToText ? item['choices'] : item['options'];
+    final options =
+        isVideoToText
+            ? List<String>.from(item['choices'] ?? [])
+            : List<String>.from(item['options'] ?? []);
+
+    print(
+      'Initializing controllers for ${isVideoToText ? "video_to_text" : "text_to_video"} quiz',
+    );
+    print('Options count: ${options.length}');
+
+    if (options.isEmpty) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!_disposed && mounted) widget.onAnswered(false);
+      });
+      return;
+    }
 
     for (final url in options) {
-      if (url != null &&
-          url.toString().isNotEmpty &&
-          !_controllers.containsKey(url)) {
+      if (!_controllers.containsKey(url)) {
         final controller = VideoPlayerController.network(url);
         controller
             .initialize()
             .then((_) {
+              if (_disposed) return;
               controller.setLooping(true);
               controller.setVolume(0);
               controller.play();
-              setState(() {});
+              if (mounted) setState(() {});
             })
-            .catchError((_) {
-              setState(() {
-                _controllers.remove(url);
-              });
+            .catchError((e) {
+              print("Video init error: $e");
             });
         _controllers[url] = controller;
       }
@@ -63,23 +75,22 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
     if (isVideoToText &&
         item['video_url'] != null &&
         item['video_url'].toString().isNotEmpty) {
-      final previewUrl = item['video_url'];
-      if (!_controllers.containsKey(previewUrl)) {
-        final controller = VideoPlayerController.network(previewUrl);
+      final url = item['video_url'];
+      if (!_controllers.containsKey(url)) {
+        final controller = VideoPlayerController.network(url);
         controller
             .initialize()
             .then((_) {
+              if (_disposed) return;
               controller.setLooping(true);
               controller.setVolume(0);
               controller.play();
-              setState(() {});
+              if (mounted) setState(() {});
             })
-            .catchError((_) {
-              setState(() {
-                _controllers.remove(previewUrl);
-              });
+            .catchError((e) {
+              print("Main video init error: $e");
             });
-        _controllers[previewUrl] = controller;
+        _controllers[url] = controller;
       }
     }
   }
@@ -89,11 +100,13 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
     for (final controller in _controllers.values) {
       controller.dispose();
     }
+    _controllers.clear();
     _confettiController.dispose();
     super.dispose();
   }
 
   void _handleAnswer(String option, bool isCorrect) {
+    if (isAnswered) return;
     setState(() {
       selectedOption = option;
       isAnswered = true;
@@ -107,13 +120,15 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
     } else {
       _confettiController.play();
       Future.delayed(const Duration(seconds: 1), () {
-        widget.onAnswered(true);
-        setState(() => showFeedback = false);
+        if (mounted && !_disposed) {
+          widget.onAnswered(true);
+        }
       });
     }
   }
 
   void _confirmContinue() {
+    if (_disposed) return;
     setState(() {
       confirmVisible = false;
       showFeedback = false;
@@ -125,16 +140,29 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final item = widget.quizItem;
     final isVideoToText = item['type'] == 'video_to_text';
-    final options =
-        isVideoToText
-            ? List<String>.from(item['choices'] ?? [])
-            : List<String>.from(
-              (item['options'] ?? []).where(
-                (opt) => _controllers[opt]?.value.isInitialized ?? false,
-              ),
-            );
+    List<String> options = [];
+    if (isVideoToText) {
+      options = List<String>.from(item['choices'] ?? []);
+    } else {
+      // For text_to_video, filter only initialized video controllers
+      final allOptions = List<String>.from(item['options'] ?? []);
+      options =
+          allOptions
+              .where(
+                (opt) =>
+                    _controllers.containsKey(opt) &&
+                    _controllers[opt]?.value.isInitialized == true,
+              )
+              .toList();
+    }
+
+    print('Building QuizCard with ${options.length} options');
+    print('Quiz type: ${isVideoToText ? "video_to_text" : "text_to_video"}');
 
     if (options.isEmpty) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!_disposed && mounted) widget.onAnswered(false);
+      });
       return const Center(
         child: Text(
           '⚠️ Skipping: No valid quiz options available.',
@@ -142,6 +170,7 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
         ),
       );
     }
+
     final correctAnswer =
         isVideoToText ? item['correct_answer'] : item['correct_video'];
 
@@ -183,7 +212,31 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
                     ),
                   )
                 else if (isVideoToText)
-                  const Icon(Icons.error_outline, color: Colors.red),
+                  Container(
+                    height: 240,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            color: Colors.red,
+                            size: 48,
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            "Video could not be loaded",
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
 
                 const SizedBox(height: 24),
 
@@ -241,18 +294,36 @@ class _QuizCardState extends State<QuizCard> with TickerProviderStateMixin {
                                           borderRadius: BorderRadius.circular(
                                             12,
                                           ),
-                                          child: SizedBox(
-                                            height: 120,
-                                            child: AspectRatio(
-                                              aspectRatio:
-                                                  _controllers[option]!
-                                                      .value
-                                                      .aspectRatio,
-                                              child: VideoPlayer(
-                                                _controllers[option]!,
-                                              ),
-                                            ),
-                                          ),
+                                          child:
+                                              _controllers.containsKey(
+                                                        option,
+                                                      ) &&
+                                                      _controllers[option]
+                                                              ?.value
+                                                              .isInitialized ==
+                                                          true
+                                                  ? SizedBox(
+                                                    height: 120,
+                                                    child: AspectRatio(
+                                                      aspectRatio:
+                                                          _controllers[option]!
+                                                              .value
+                                                              .aspectRatio,
+                                                      child: VideoPlayer(
+                                                        _controllers[option]!,
+                                                      ),
+                                                    ),
+                                                  )
+                                                  : Container(
+                                                    height: 120,
+                                                    color: Colors.grey.shade300,
+                                                    child: const Center(
+                                                      child: Icon(
+                                                        Icons.error_outline,
+                                                        color: Colors.red,
+                                                      ),
+                                                    ),
+                                                  ),
                                         ),
                                       ),
                             ),

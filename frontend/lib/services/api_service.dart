@@ -48,6 +48,12 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> getUserStatus() async {
+    final userId = await getUserId();
+    final response = await get('/status/$userId');
+    return jsonDecode(response.body);
+  }
+
   Future<http.Response> post(String endpoint, Map<String, dynamic> data) async {
     try {
       final headers = await getHeaders();
@@ -169,9 +175,18 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> getUserStatus() async {
+  Future<String?> updateUserProfile(String name, String username) async {
     final userId = await getUserId();
-    final response = await get('/status/$userId');
-    return jsonDecode(response.body);
+    final response = await put('/profile/$userId', {
+      'name': name,
+      'username': username,
+    });
+
+    if (response.statusCode == 200) {
+      return null; // success
+    } else {
+      final error = jsonDecode(response.body);
+      return error['detail'] ?? 'Failed to update profile';
+    }
   }
 }
